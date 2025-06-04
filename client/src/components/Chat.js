@@ -286,11 +286,6 @@ const Chat = ({ token }) => {
             <div className="welcome-message">
               <h3>Welcome to AI Customer Support!</h3>
               <p>How can I help you today?</p>
-              <div className="welcome-features">
-                <div className="feature">💬 Natural conversations</div>
-                <div className="feature">🧠 Context awareness</div>
-                <div className="feature">🌍 Multilingual support</div>
-              </div>
             </div>
           )}
           
