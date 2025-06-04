@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: ai-support-db
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ai-support-network
+
+  backend:
+    build: ./server
+    container_name: ai-support-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./server/.env
+    depends_on:
+      - mongodb
+    networks:
+      - ai-support-network
+
+  frontend:
+    build: ./client
+    container_name: ai-support-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    env_file:
+      - ./client/.env
+    depends_on:
+      - backend
+    networks:
+      - ai-support-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  ai-support-network:
+    driver: bridge
