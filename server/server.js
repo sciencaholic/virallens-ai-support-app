@@ -139,8 +139,6 @@ const PORT = process.env.PORT || 3001;
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Rate limiting: ${isDevelopment ? 'Relaxed' : 'Strict'}`);
-  console.log(`CORS origins: ${corsOptions.origin}`);
   
   if (isProduction) {
     console.log(`Serving static files from: ${path.join(__dirname, 'public')}`);

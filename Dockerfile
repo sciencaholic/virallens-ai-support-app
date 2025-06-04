@@ -4,21 +4,21 @@ FROM node:18-alpine
 # Set working directory
 WORKDIR /app
 
-# Install dependencies for both frontend and backend
+# Copy package files for dependency installation
 COPY client/package*.json ./client/
 COPY server/package*.json ./server/
 
 # Install backend dependencies
 RUN cd server && npm install --only=production
 
-# Install frontend dependencies and build
-RUN cd client && npm install && npm run build
+# Install frontend dependencies
+RUN cd client && npm install
 
-# Copy source code
+# Copy source code (MUST come before build)
 COPY client/ ./client/
 COPY server/ ./server/
 
-# Build frontend
+# Build frontend AFTER copying source code
 RUN cd client && npm run build
 
 # Move built frontend to server's public directory
