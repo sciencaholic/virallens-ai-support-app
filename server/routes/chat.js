@@ -13,8 +13,8 @@ router.use(authenticateToken);
 const messageValidation = [
   body('message')
     .trim()
-    .isLength({ min: 1, max: 1000 })
-    .withMessage('Message must be between 1 and 1000 characters')
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('Message must be between 1 and 2000 characters')
 ];
 
 // Helper function to handle validation errors
@@ -29,24 +29,36 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// AI Service configuration for OpenRouter
+// Environment-aware AI configuration
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 const AI_CONFIG = {
   apiUrl: process.env.AI_API_URL || 'https://openrouter.ai/api/v1/chat/completions',
   model: process.env.AI_MODEL || 'google/gemma-3-4b-it:free',
-  maxTokens: parseInt(process.env.AI_MAX_TOKENS) || 150,
+  maxTokens: parseInt(process.env.AI_MAX_TOKENS) || (isDevelopment ? 256 : 512),
   temperature: parseFloat(process.env.AI_TEMPERATURE) || 0.7,
-  systemPrompt: 'You are a helpful customer support assistant. Be concise, friendly, and professional.'
+  systemPrompt: 'You are a helpful customer support assistant. Be concise, friendly, and professional. Respond in a conversational tone and provide clear, actionable assistance.',
+  typingDelay: isDevelopment ? 500 : 1500, // Shorter delay in development
+  minTypingTime: isDevelopment ? 1000 : 2000, // Minimum typing time for realism
 };
 
-// Function to call OpenRouter AI Service
-const callAIService = async (messages) => {
+// Function to simulate typing delay
+const simulateTyping = async (duration) => {
+  return new Promise(resolve => setTimeout(resolve, duration));
+};
+
+// Function to call OpenRouter AI Service with typing simulation
+const callAIService = async (messages, onTypingStart, onTypingEnd) => {
   try {
-    console.log('Calling OpenRouter API...');
+    console.log('🤖 Calling OpenRouter API with Gemma 3 4B...');
     
     // Check if API key exists
     if (!process.env.OPENROUTER_API_KEY) {
       throw new Error('OPENROUTER_API_KEY is not configured');
     }
+
+    // Start typing indicator
+    if (onTypingStart) onTypingStart();
 
     // Prepare messages for OpenRouter (OpenAI-compatible format)
     const formattedMessages = [
@@ -65,10 +77,17 @@ const callAIService = async (messages) => {
       messages: formattedMessages,
       max_tokens: AI_CONFIG.maxTokens,
       temperature: AI_CONFIG.temperature,
-      stream: false
+      stream: false,
+      // Optimize for Gemma 3 4B performance
+      top_p: 0.9,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.1
     };
 
-    console.log('Request data:', JSON.stringify(requestData, null, 2));
+    console.log('📤 Request data for Gemma 3 4B:', JSON.stringify(requestData, null, 2));
+    
+    // Simulate minimum typing time for better UX
+    const startTime = Date.now();
     
     const response = await axios.post(
       AI_CONFIG.apiUrl,
@@ -78,27 +97,47 @@ const callAIService = async (messages) => {
           'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-          'X-Title': 'Virallens AI Customer Support'
+          'X-Title': 'AI Customer Support - Gemma 3 4B'
         },
-        timeout: 30000
+        timeout: 45000
       }
     );
 
-    console.log('OpenRouter response:', response.data);
+    // Ensure minimum typing time for realistic feel
+    const elapsedTime = Date.now() - startTime;
+    const remainingTime = Math.max(0, AI_CONFIG.minTypingTime - elapsedTime);
+    
+    if (remainingTime > 0) {
+      await simulateTyping(remainingTime);
+    }
+
+    console.log('📥 OpenRouter Gemma 3 4B response:', response.data);
 
     // Extract the AI response from OpenRouter's response format
     const aiResponse = response.data?.choices?.[0]?.message?.content;
     
     if (!aiResponse) {
-      console.error('No response content from OpenRouter');
+      console.error('❌ No response content from Gemma 3 4B');
       throw new Error('No response content received from AI service');
     }
+
+    // End typing indicator
+    if (onTypingEnd) onTypingEnd();
 
     return aiResponse.trim();
 
   } catch (error) {
-    console.error('OpenRouter API Error:', error.response?.data || error.message);
-    console.error('Error status:', error.response?.status);
+    // End typing indicator on error
+    if (onTypingEnd) onTypingEnd();
+    
+    console.error('💥 OpenRouter Gemma 3 4B API Error:', error.response?.data || error.message);
+    console.error('📊 Error status:', error.response?.status);
+    console.error('📋 Error headers:', error.response?.headers);
+    
+    // Enhanced error handling for better debugging
+    if (error.response?.data?.error) {
+      console.error('🔍 Detailed error:', error.response.data.error);
+    }
     
     // Check for specific errors
     if (error.response?.status === 401) {
@@ -108,9 +147,14 @@ const callAIService = async (messages) => {
     } else if (error.response?.status === 429) {
       throw new Error('Rate limit exceeded - please try again later');
     } else if (error.response?.status === 400) {
-      throw new Error('Invalid request to AI service');
+      const errorDetails = error.response?.data?.error?.message || 'Invalid request';
+      throw new Error(`Invalid request to AI service: ${errorDetails}`);
+    } else if (error.response?.status === 503) {
+      throw new Error('Gemma 3 4B model is temporarily unavailable - please try again in a moment');
     } else if (error.message.includes('OPENROUTER_API_KEY is not configured')) {
       throw new Error('AI service not properly configured');
+    } else if (error.code === 'ECONNABORTED') {
+      throw new Error('Request timeout - please try again');
     }
     
     throw new Error(`AI service temporarily unavailable: ${error.response?.status || error.message}`);
@@ -122,7 +166,7 @@ router.post('/send', messageValidation, handleValidationErrors, async (req, res)
     const { message } = req.body;
     const userId = req.userId;
 
-    console.log('Received message from user:', userId, message);
+    console.log('📨 Received message from user:', userId, message);
 
     // Get or create chat for user
     let chat = await Chat.getOrCreateUserChat(userId);
@@ -134,31 +178,45 @@ router.post('/send', messageValidation, handleValidationErrors, async (req, res)
     });
 
     let assistantMessage;
+    let typingStarted = false;
 
     try {
-      // Prepare messages for AI (keep last 10 for context)
-      const contextMessages = chat.messages.slice(-10).map(msg => ({
+      // Prepare messages for AI (Gemma 3 4B supports large context, keep last 20 messages)
+      const contextMessages = chat.messages.slice(-20).map(msg => ({
         role: msg.role,
         content: msg.content
       }));
 
-      console.log('Sending to AI service...');
+      console.log('🚀 Sending to Gemma 3 4B AI service with context length:', contextMessages.length);
       
-      // Call AI service
-      assistantMessage = await callAIService(contextMessages);
+      // Call AI service with typing callbacks
+      assistantMessage = await callAIService(
+        contextMessages,
+        () => {
+          typingStarted = true;
+          console.log('⌨️ Typing indicator started');
+        },
+        () => {
+          console.log('✅ Typing indicator ended');
+        }
+      );
       
-      console.log('Received AI response:', assistantMessage);
+      console.log('🎯 Received Gemma 3 4B AI response:', assistantMessage);
 
     } catch (aiError) {
-      console.error('AI service failed:', aiError.message);
+      console.error('❌ Gemma 3 4B AI service failed:', aiError.message);
       
       // Provide user-friendly error messages based on the specific error
       if (aiError.message.includes('API key')) {
         assistantMessage = "I'm sorry, but our AI service is not properly configured. Please contact our support team for immediate assistance.";
       } else if (aiError.message.includes('credits')) {
         assistantMessage = "I'm sorry, but our AI service is temporarily unavailable due to credit limits. Please contact our support team for immediate assistance, or try again later.";
-      } else if (aiError.message.includes('rate limit')) {
+      } else if (aiError.message.includes('rate limit') || aiError.message.includes('Rate limit')) {
         assistantMessage = "I'm currently handling a lot of requests. Please try again in a few moments.";
+      } else if (aiError.message.includes('timeout')) {
+        assistantMessage = "I'm taking a bit longer to respond than usual. Please try sending your message again.";
+      } else if (aiError.message.includes('temporarily unavailable')) {
+        assistantMessage = "I'm temporarily unavailable right now. Please try again in a moment.";
       } else if (aiError.message.includes('not configured')) {
         assistantMessage = "I'm sorry, but our AI service is not properly set up. Please contact our support team for help.";
       } else {
@@ -173,25 +231,48 @@ router.post('/send', messageValidation, handleValidationErrors, async (req, res)
     });
 
     // Update chat title if it's the first exchange
-    if (chat.messages.length <= 2 && !chat.title) {
+    if (chat.messages.length <= 2 && (!chat.title || chat.title === 'New Chat')) {
       chat.title = message.substring(0, 50) + (message.length > 50 ? '...' : '');
     }
 
     await chat.save();
 
-    console.log('Chat saved successfully');
+    console.log('💾 Chat saved successfully');
 
     res.json({
       message: assistantMessage,
       chatId: chat._id,
-      messageCount: chat.messages.length
+      messageCount: chat.messages.length,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Send message error:', error);
+    console.error('💥 Send message error:', error);
     res.status(500).json({ 
       error: 'Server error',
-      message: 'Failed to send message'
+      message: 'Failed to send message',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+router.post('/typing', async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Simulate typing delay based on environment
+    await simulateTyping(AI_CONFIG.typingDelay);
+    
+    res.json({
+      typing: true,
+      userId: userId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Typing simulation error:', error);
+    res.status(500).json({ 
+      error: 'Server error',
+      message: 'Failed to simulate typing'
     });
   }
 });
@@ -217,7 +298,8 @@ router.get('/history', async (req, res) => {
       chats: chatHistory,
       page: parseInt(page),
       limit: parseInt(limit),
-      total: chats.length
+      total: chats.length,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -243,7 +325,10 @@ router.get('/:chatId', async (req, res) => {
       });
     }
 
-    res.json({ chat });
+    res.json({ 
+      chat,
+      timestamp: new Date().toISOString()
+    });
 
   } catch (error) {
     console.error('Get chat error:', error);
@@ -274,7 +359,8 @@ router.delete('/:chatId', async (req, res) => {
 
     res.json({ 
       message: 'Chat deleted successfully',
-      chatId: chat._id
+      chatId: chat._id,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -304,7 +390,8 @@ router.post('/new', async (req, res) => {
         _id: newChat._id,
         title: newChat.title,
         createdAt: newChat.createdAt
-      }
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
