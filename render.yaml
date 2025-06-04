@@ -1,0 +1,17 @@
+services:
+  # Backend Service
+  - type: web
+    name: ai-support-backend
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    plan: free
+    healthCheckPath: /health
+
+  # Frontend Service  
+  - type: web
+    name: ai-support-frontend
+    runtime: docker
+    dockerfilePath: ./client/Dockerfile
+    dockerContext: ./client
+    plan: free
